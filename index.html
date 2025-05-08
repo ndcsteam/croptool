@@ -601,7 +601,7 @@
                     <div id="cropRect" class="crop-rect"></div>
                 </div>
                 
-                <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">在图片上拖动鼠标选择裁剪区域，或直接修改下方参数：</p>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">点击一下开始绘制，移动鼠标调整区域大小，再点击一下确认裁剪区域：</p>
             </div>
             
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -923,38 +923,136 @@
         });
         
         // 选择区域相关事件
-        livePreviewContainer.addEventListener('mousedown', startSelection);
+        livePreviewContainer.addEventListener('click', toggleSelection);
         livePreviewContainer.addEventListener('mousemove', updateSelection);
-        livePreviewContainer.addEventListener('mouseup', endSelection);
-        livePreviewContainer.addEventListener('mouseleave', cancelSelection);
         
-        // 开始选择区域
-        function startSelection(e) {
-            // 如果正在选择颜色，则不进行区域选择
+        // 如果鼠标离开预览区域，取消选择
+        livePreviewContainer.addEventListener('mouseleave', function() {
+            if (isSelecting) {
+                isSelecting = false;
+                if (selectionRect) {
+                    selectionRect.style.display = 'none';
+                }
+            }
+        });
+        
+        // 切换选择模式
+        function toggleSelection(e) {
+            // 如果正在选择颜色，不进行区域选择
             if (isPickingColor) return;
             
             // 获取点击位置相对于预览容器的坐标
             const containerRect = livePreviewContainer.getBoundingClientRect();
-            const startX = e.clientX - containerRect.left;
-            const startY = e.clientY - containerRect.top;
+            const clickX = e.clientX - containerRect.left;
+            const clickY = e.clientY - containerRect.top;
             
-            // 创建或重置选择框
-            if (!selectionRect) {
-                selectionRect = document.createElement('div');
-                selectionRect.className = 'selection-rect';
-                livePreviewContainer.appendChild(selectionRect);
+            // 如果已经在选择中，则完成选择
+            if (isSelecting) {
+                // 计算选择的矩形区域
+                const left = Math.min(selectionStart.x, clickX);
+                const top = Math.min(selectionStart.y, clickY);
+                const width = Math.abs(clickX - selectionStart.x);
+                const height = Math.abs(clickY - selectionStart.y);
+                
+                // 如果选择的区域太小，可能是误操作，直接取消
+                if (width < 5 || height < 5) {
+                    cancelSelection();
+                    return;
+                }
+                
+                // 计算选择区域在原图上的对应坐标和尺寸
+                const imgRect = livePreviewImage.getBoundingClientRect();
+                if (!imageMetadata.has(currentPreviewIndex)) return;
+                
+                const metadata = imageMetadata.get(currentPreviewIndex);
+                
+                // 计算图片在容器中的位置
+                const imgLeft = imgRect.left - containerRect.left;
+                const imgTop = imgRect.top - containerRect.top;
+                
+                // 将选择区域相对于图片的坐标
+                const relLeft = left - imgLeft;
+                const relTop = top - imgTop;
+                
+                // 只有当选择区域在图片范围内时才继续处理
+                if (relLeft >= 0 && relTop >= 0 && relLeft + width <= imgRect.width && relTop + height <= imgRect.height) {
+                    // 计算缩放比例
+                    const scaleX = metadata.width / imgRect.width;
+                    const scaleY = metadata.height / imgRect.height;
+                    
+                    // 计算在原图上的坐标和尺寸
+                    const originalX = Math.round(relLeft * scaleX);
+                    const originalY = Math.round(relTop * scaleY);
+                    const originalWidth = Math.round(width * scaleX);
+                    const originalHeight = Math.round(height * scaleY);
+                    
+                    // 更新裁剪参数输入框
+                    cropXInput.value = originalX;
+                    cropYInput.value = originalY;
+                    cropWidthInput.value = originalWidth;
+                    cropHeightInput.value = originalHeight;
+                    
+                    // 触发更新裁剪矩形显示
+                    updateCropRectDisplay();
+                }
+                
+                // 显示确认效果
+                const confirmFlash = document.createElement('div');
+                confirmFlash.style.position = 'absolute';
+                confirmFlash.style.top = '0';
+                confirmFlash.style.left = '0';
+                confirmFlash.style.right = '0';
+                confirmFlash.style.bottom = '0';
+                confirmFlash.style.backgroundColor = 'rgba(93, 92, 222, 0.2)';
+                confirmFlash.style.zIndex = '30';
+                confirmFlash.style.animation = 'flash 0.4s ease-out';
+                livePreviewContainer.appendChild(confirmFlash);
+                
+                // 创建并添加动画样式
+                if (!document.getElementById('flash-animation')) {
+                    const style = document.createElement('style');
+                    style.id = 'flash-animation';
+                    style.textContent = `
+                        @keyframes flash {
+                            0% { opacity: 0.6; }
+                            100% { opacity: 0; }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+                
+                // 移除闪烁效果
+                setTimeout(() => {
+                    livePreviewContainer.removeChild(confirmFlash);
+                }, 400);
+                
+                // 重置选择状态
+                isSelecting = false;
+                
+                // 隐藏选择框
+                if (selectionRect) {
+                    selectionRect.style.display = 'none';
+                }
+            } else {
+                // 开始新的选择
+                // 创建或重置选择框
+                if (!selectionRect) {
+                    selectionRect = document.createElement('div');
+                    selectionRect.className = 'selection-rect';
+                    livePreviewContainer.appendChild(selectionRect);
+                }
+                
+                // 设置选择框初始位置
+                selectionRect.style.left = `${clickX}px`;
+                selectionRect.style.top = `${clickY}px`;
+                selectionRect.style.width = '0';
+                selectionRect.style.height = '0';
+                selectionRect.style.display = 'block';
+                
+                // 记录选择起始位置
+                selectionStart = { x: clickX, y: clickY };
+                isSelecting = true;
             }
-            
-            // 设置选择框初始位置
-            selectionRect.style.left = `${startX}px`;
-            selectionRect.style.top = `${startY}px`;
-            selectionRect.style.width = '0';
-            selectionRect.style.height = '0';
-            selectionRect.style.display = 'block';
-            
-            // 记录选择起始位置
-            selectionStart = { x: startX, y: startY };
-            isSelecting = true;
         }
         
         // 更新选择区域
@@ -977,80 +1075,6 @@
             selectionRect.style.top = `${top}px`;
             selectionRect.style.width = `${width}px`;
             selectionRect.style.height = `${height}px`;
-        }
-        
-        // 结束选择区域
-        function endSelection(e) {
-            if (!isSelecting) return;
-            
-            // 获取结束位置
-            const containerRect = livePreviewContainer.getBoundingClientRect();
-            const endX = e.clientX - containerRect.left;
-            const endY = e.clientY - containerRect.top;
-            
-            // 计算选择的矩形区域
-            const left = Math.min(selectionStart.x, endX);
-            const top = Math.min(selectionStart.y, endY);
-            const width = Math.abs(endX - selectionStart.x);
-            const height = Math.abs(endY - selectionStart.y);
-            
-            // 如果选择的区域太小，可能是意外点击，直接取消
-            if (width < 5 || height < 5) {
-                cancelSelection();
-                return;
-            }
-            
-            // 计算选择区域在原图上的对应坐标和尺寸
-            const imgRect = livePreviewImage.getBoundingClientRect();
-            if (!imageMetadata.has(currentPreviewIndex)) return;
-            
-            const metadata = imageMetadata.get(currentPreviewIndex);
-            
-            // 计算图片在容器中的位置
-            const imgLeft = imgRect.left - containerRect.left;
-            const imgTop = imgRect.top - containerRect.top;
-            
-            // 将选择区域相对于图片的坐标
-            const relLeft = left - imgLeft;
-            const relTop = top - imgTop;
-            
-            // 只有当选择区域在图片范围内时才继续处理
-            if (relLeft >= 0 && relTop >= 0 && relLeft + width <= imgRect.width && relTop + height <= imgRect.height) {
-                // 计算缩放比例
-                const scaleX = metadata.width / imgRect.width;
-                const scaleY = metadata.height / imgRect.height;
-                
-                // 计算在原图上的坐标和尺寸
-                const originalX = Math.round(relLeft * scaleX);
-                const originalY = Math.round(relTop * scaleY);
-                const originalWidth = Math.round(width * scaleX);
-                const originalHeight = Math.round(height * scaleY);
-                
-                // 更新裁剪参数输入框
-                cropXInput.value = originalX;
-                cropYInput.value = originalY;
-                cropWidthInput.value = originalWidth;
-                cropHeightInput.value = originalHeight;
-                
-                // 触发更新裁剪矩形显示
-                updateCropRectDisplay();
-            }
-            
-            // 重置选择状态
-            isSelecting = false;
-            
-            // 隐藏选择框
-            if (selectionRect) {
-                selectionRect.style.display = 'none';
-            }
-        }
-        
-        // 取消选择
-        function cancelSelection() {
-            isSelecting = false;
-            if (selectionRect) {
-                selectionRect.style.display = 'none';
-            }
         }
         
         // 在图片上选择颜色
